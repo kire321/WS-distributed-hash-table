@@ -3,9 +3,11 @@ package akkaTutorial
 import akka.actor._
 import akka.pattern._
 import akka.util.Timeout
+
 import scala.collection.mutable
-import scala.concurrent.Await
+import scala.concurrent.{ExecutionContext, Await}
 import scala.concurrent.duration._
+import ExecutionContext.Implicits.global
 
 import org.scalatest.FlatSpec
 
@@ -17,12 +19,11 @@ import Constants._;
  
 
 sealed trait WSMessage
-case class Lookup(address:Int) extends WSMessage
 case class Read(address:Int) extends WSMessage
-case class Redirect(next:ActorRef) extends WSMessage
-case class LoveMe(returnAddress:Int) extends WSMessage
+case class AddNeighbor(newNeighbor:ActorRef) extends WSMessage
 case class Write(key:Int, value:String) extends WSMessage
 case class GetDegree extends WSMessage
+case class GetAddress extends WSMessage
 
 class Node(
   val address:Int,
@@ -32,8 +33,12 @@ class Node(
   def receive = {
     case GetDegree =>
       sender ! neighbors.size
-    case LoveMe(returnAddress) =>
-      neighbors(returnAddress) = sender
+    case GetAddress =>
+      sender ! address
+    case AddNeighbor(newNeighbor) =>
+      newNeighbor ? GetAddress onSuccess {
+        case newAddress:Int => neighbors(newAddress) = newNeighbor
+      }
     case Write(key, value) =>
       data(key) = value
     case Read(soughtAddress) =>
@@ -47,8 +52,9 @@ class Node(
           )._2
         if(nearest == self)
           sender ! Status.Failure(KeyNotFound)
-        else
-          sender ! Redirect(nearest)
+        else {
+          nearest forward Read(soughtAddress)
+        }
       }
   }
 }
@@ -63,7 +69,7 @@ object WSSpec extends FlatSpec {
 
   "A single node" should "read items" in {
     val sn = SingleNode
-    assert(Await.result(sn.node ? Read(1), 1 second).asInstanceOf[String] == "foobar")
+    assert(Await.result(sn.node ? Read(1), 1 second).asInstanceOf[String] === "foobar")
     sn.system.shutdown()
   }
 
@@ -75,24 +81,35 @@ object WSSpec extends FlatSpec {
     assert(thrown === KeyNotFound)
   }
 
-//  def readMultipleNodes = {
-//    val system = ActorSystem("WSSystem")
-//    val addresses = 0 until 10
-//    val nodes = for(i <- addresses) yield system.actorOf(Props(new
-//      Node(i, new mutable.HashMap[Int, ActorRef], new collection.mutable.HashMap[Int,String])), name = "node" + i.toString)
-//    val pairs = (nodes.takeRight(1) ++ nodes zip addresses) ++ (nodes zip (addresses.takeRight(1) ++ addresses))
-//    pairs foreach {
-//      t => t._1 !  LoveMe(t._2)
-//    }
-//    nodes foreach {
-//      node:ActorRef => node ? GetDegree onSuccess {
-//        case degree => assert(degree == 2)
-//      }
-//    }
-//    //nodes take(5) last ! Write(5, "foobar")
-//    //nodes head ? Read(5) onSuccess
-//    system.shutdown()
-//  }
+  def SinglyLinkedRing = new {
+    val system = ActorSystem("WSSystem")
+    val nodes = for(i <- 0 until 10) yield system.actorOf(Props(new
+        Node(i, new mutable.HashMap[Int, ActorRef], new collection.mutable.HashMap[Int,String])), name = "node" + i.toString)
+    val pairs = (nodes.takeRight(1) ++ nodes zip nodes) ++ (nodes zip (nodes.takeRight(1) ++ nodes))
+    pairs foreach {
+      t => t._1 ! AddNeighbor(t._2)
+    }
+    Thread.sleep(1000)
+  }
+
+  "A singly linked ring" should "have degree 2 everywhere" in {
+    val slr = SinglyLinkedRing
+    slr.nodes foreach {
+      node:ActorRef => node ? GetDegree onSuccess {
+        case degree => {
+          assert(degree === 2)
+        }
+      }
+    }
+    slr.system.shutdown()
+  }
+
+  it should "read data from across the ring" in {
+    val slr = SinglyLinkedRing
+    slr.nodes.take(6).last ! Write(5, "foobar")
+    assert(Await.result(slr.nodes.head ? Read(5), 1 second).asInstanceOf[String] === "foobar")
+    slr.system.shutdown()
+  }
 }
 
 object WattsStrogatz extends App {
