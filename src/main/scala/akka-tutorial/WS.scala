@@ -47,7 +47,8 @@ class Node(
           )._2
         if(nearest == self)
           sender ! Status.Failure(KeyNotFound)
-        sender ! Redirect(nearest)
+        else
+          sender ! Redirect(nearest)
       }
   }
 }
@@ -69,7 +70,7 @@ object WSSpec extends FlatSpec {
   it should "throw an exception when asked to read nonexistent items" in {
     val sn = SingleNode
     val thrown = intercept[Exception] {
-      sn.node ? Read(2)
+      println(Await.result(sn.node ? Read(2), 1 second).asInstanceOf[String])
     }
     assert(thrown === KeyNotFound)
   }
