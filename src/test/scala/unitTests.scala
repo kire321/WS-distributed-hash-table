@@ -2,30 +2,15 @@ package akkaTutorial
 
 import akka.actor._
 import akka.pattern._
-import akka.util.Timeout
 
-import scala.collection.mutable
 import scala.concurrent.{ExecutionContext, Await, Future}
 import scala.concurrent.duration._
 import ExecutionContext.Implicits.global
 
 import org.scalatest.FlatSpec
-
-object Constants {
-  implicit val timeout = Timeout(1 second)
-  val KeyNotFound = new Exception("Key not found")
-}
 import Constants._;
 
 class WSSpec extends FlatSpec {
-
-  def actor(system:ActorSystem, name:String, address:Int) = system.actorOf(Props(new Node(address, new mutable.HashMap[Int, ActorRef],
-    new collection.mutable.HashMap[Int,String])), name = name)
-
-  def SingleNode = new {
-    val system = ActorSystem("WSSystem")
-    val node = actor(system, "node", 1)
-  }
 
   "A single node" should "store items" in {
     val sn = SingleNode

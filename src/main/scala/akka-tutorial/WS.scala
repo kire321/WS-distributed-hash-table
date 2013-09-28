@@ -4,13 +4,19 @@ import akka.actor._
 import akka.pattern._
 import akka.util.Timeout
 
-import scala.concurrent.ExecutionContext
+import scala.concurrent.{ExecutionContext, Await}
 import scala.concurrent.duration._
 import ExecutionContext.Implicits.global
 
 object Constants {
   implicit val timeout = Timeout(1 second)
   val KeyNotFound = new Exception("Key not found")
+  def actor(system:ActorSystem, name:String, address:Int) = system.actorOf(Props(new Node(address, new collection.mutable.HashMap[Int, ActorRef],
+    new collection.mutable.HashMap[Int,String])), name = name)
+  def SingleNode = new {
+    val system = ActorSystem("WSSystem")
+    val node = actor(system, "node", 1)
+  }
 }
 import Constants._;
  
@@ -65,6 +71,22 @@ class Node(
           nearest forward Read(soughtAddress)
         }
       }
+  }
+}
+
+object Main {
+  def main(args:Array[String]) {
+    val sn = SingleNode
+    if (args.length > 0) {
+      val read = for {
+        remote <- sn.system.actorSelection("akka.tcp://WSSystem@127.0.1.1:" + args(0) + "/user/node").resolveOne(1 second)
+        written <- remote ? Write(1, "foobar")
+        read <- remote ? Read(1)
+      } yield read
+      assert(Await.result(read, 1 second).asInstanceOf[String] == "foobar")
+      println("Looks like everything worked.")
+      sn.system.shutdown()
+    }
   }
 }
 
